@@ -3,12 +3,14 @@ import os
 import re
 import json
 import gspread
-import dateparser # New library for advanced date handling
+import dateparser
 import google.generativeai as genai
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from thefuzz import fuzz
+from flask import Flask # New: Import Flask for the web server
+from threading import Thread # New: To run the bot and server together
 
 # --- SETUP AND AUTHENTICATION ---
 
@@ -19,10 +21,22 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 genai.configure(api_key=GEMINI_API_KEY)
 llm = genai.GenerativeModel('gemini-1.5-flash')
 
-# Final MASTER_PROMPT with date extraction
+# --- NEW: FLASK WEB SERVER SETUP ---
+# This part will keep the Render Web Service "live"
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Telegram bot is running."
+
+def run_flask():
+    # Render provides the PORT environment variable
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# --- MASTER PROMPT FOR THE LLM ---
 MASTER_PROMPT = """
-You are a highly intelligent sermon retrieval assistant for Citizens of Light Church.
-Your goal is to analyze the user's message and return a structured JSON object.
+You are a highly intelligent sermon retrieval assistant for Citizens of Light Church. Your goal is to analyze the user's message and return a structured JSON object.
 
 RULES:
 1.  **Extract Keywords:** Infer themes from situations, Bible verses, or direct queries.
@@ -30,18 +44,15 @@ RULES:
 3.  **Extract Date:** If the user specifies a date (e.g., 'October 27, 2024'), extract it and format it as 'DD-MM-YYYY'. If no date is mentioned, the value should be null.
 4.  **Handle Pagination:** If the user says "more" or "next", use the topic of their most recent search as the keyword.
 5.  **Output Format:** Your entire response MUST BE a single, valid JSON object with three keys: "keywords" (string), "limit" (integer), and "date" (string or null).
-
 ---
-USER'S SEARCH HISTORY (most recent is last):
-{history}
+USER'S SEARCH HISTORY (most recent is last): {history}
 ---
-USER'S CURRENT MESSAGE:
-"{query}"
+USER'S CURRENT MESSAGE: "{query}"
 ---
 JSON RESPONSE:
 """
 
-print("Final production bot is starting...")
+print("Final production bot with web server is starting...")
 
 # --- BOT LOGIC ---
 
@@ -61,17 +72,15 @@ async def get_instructions_from_llm(query, history_list):
         
         instructions['keywords'] = instructions.get('keywords', '').lower()
         instructions['limit'] = int(instructions.get('limit', 10))
-        instructions['date'] = instructions.get('date', None) # New date field
+        instructions['date'] = instructions.get('date', None)
         return instructions
         
-    except (json.JSONDecodeError, AttributeError, ValueError) as e:
-        print(f"Error parsing LLM response: {e}. Falling back.")
-        return {'keywords': query.lower(), 'limit': 10, 'date': None}
     except Exception as e:
-        print(f"Error calling Gemini API: {e}")
-        return None
+        print(f"Error communicating with LLM: {e}")
+        return {'keywords': query.lower(), 'limit': 10, 'date': None}
 
 async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # ... (The entire search_sermons function remains unchanged)
     if 'search_history' not in context.user_data: context.user_data['search_history'] = []
     if 'pagination_map' not in context.user_data: context.user_data['pagination_map'] = {}
 
@@ -101,19 +110,16 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     found_sermons = []
-    # --- NEW: DATE SEARCH LOGIC ---
     if search_date_str:
         target_date = dateparser.parse(search_date_str, date_formats=['%d-%m-%Y'])
         if target_date:
             for sermon in all_sermons:
                 sermon_date = dateparser.parse(str(sermon.get('Date', '')), settings={'DATE_ORDER': 'DMY'})
                 if sermon_date and sermon_date.date() == target_date.date():
-                    # For date searches, score is not relevant, but we add it for consistency
                     found_sermons.append({'sermon': sermon, 'score': 100})
     else:
-        # --- FALLBACK TO KEYWORD SEARCH ---
         offset = context.user_data['pagination_map'][keywords_str]
-        if offset == 0: # Only search on the first page
+        if offset == 0:
             search_terms = [term.strip() for term in keywords_str.split(',')]
             for sermon in all_sermons:
                 search_text = f"{sermon.get('Message Title', '')} {sermon.get('Preacher', '')}".lower()
@@ -124,10 +130,9 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             found_sermons.sort(key=lambda x: x['score'], reverse=True)
             context.user_data[keywords_str + '_results'] = found_sermons
     
-    # Pagination logic now uses the right list of results
     if search_date_str:
         all_found_sermons = found_sermons
-        offset = 0 # Date searches don't paginate by default
+        offset = 0
     else:
         all_found_sermons = context.user_data.get(keywords_str + '_results', [])
         offset = context.user_data['pagination_map'][keywords_str]
@@ -144,16 +149,22 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         sermon = item['sermon']
         response_message += f"📖 <b>Message Title:</b> {sermon['Message Title']}\n🎤 <b>Preacher:</b> {sermon['Preacher']}\n🗓️ <b>Date:</b> {sermon['Date']}\n🔗 <b>Download Link:</b> {sermon['Download Link']}\n\n"
     
-    if not search_date_str: # Only update pagination offset for keyword searches
+    if not search_date_str:
         context.user_data['pagination_map'][keywords_str] += len(results_to_show)
     
     await update.message.reply_html(response_message)
 
 def main() -> None:
+    """Start the bot."""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_sermons))
     application.run_polling()
 
 if __name__ == '__main__':
+    # Start the Flask server in a new thread
+    flask_thread = Thread(target=run_flask)
+    flask_thread.start()
+    
+    # Start the Telegram bot
     main()
