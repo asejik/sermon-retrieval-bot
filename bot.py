@@ -58,10 +58,15 @@ print("Final production bot with web server is starting...")
 # --- BOT LOGIC ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Sends a welcome message and clears the user's search history."""
     context.user_data['search_history'] = []
     context.user_data['pagination_map'] = {}
     user = update.effective_user
-    await update.message.reply_text(f"Hi {user.first_name}! This is the final production version. I can now search by date.")
+    welcome_message = (
+        f"Hi {user.first_name}! You can search for messages of Citizens of Light Church through this bot. "
+        "Just send me a message with your request, like 'sermons on faith' or 'messages from last Sunday'."
+    )
+    await update.message.reply_text(welcome_message)
 
 async def get_instructions_from_llm(query, history_list):
     try:
