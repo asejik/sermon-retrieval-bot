@@ -53,7 +53,7 @@ USER'S CURRENT MESSAGE: "{query}"
 JSON RESPONSE:
 """
 
-print("Final production bot with web server is starting...")
+print("Bot is starting (forced restart)...")
 
 # --- BOT LOGIC ---
 
