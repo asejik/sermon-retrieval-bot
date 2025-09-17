@@ -4,6 +4,7 @@ import re
 import json
 import gspread
 import dateparser
+from datetime import datetime # New: For date handling
 import google.generativeai as genai
 from dotenv import load_dotenv
 from telegram import Update
@@ -19,15 +20,19 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 genai.configure(api_key=GEMINI_API_KEY)
 llm = genai.GenerativeModel('gemini-1.5-flash')
 
-# MASTER_PROMPT for the LLM
+# Final MASTER_PROMPT with current date context
 MASTER_PROMPT = """
 You are a highly intelligent sermon retrieval assistant for Citizens of Light Church.
 Your goal is to analyze the user's message and return a structured JSON object.
+The current date is Wednesday, September 17, 2025.
 
 RULES:
 1.  **Extract Keywords:** Infer themes from situations, Bible verses, or direct queries.
 2.  **Extract Limit:** If the user specifies a number of results (e.g., 'give me 5'), extract that number. Default is 10.
-3.  **Extract Date:** If the user specifies a date (e.g., 'October 27, 2024'), extract it and format it as 'DD-MM-YYYY'. If no date is mentioned, the value should be null.
+3.  **Extract Date:**
+    - If the user specifies a date (e.g., 'October 27, 2024', 'last sunday'), calculate and extract it, formatted as 'DD-MM-YYYY'.
+    - If the user only specifies a year (e.g., 'messages from 2022'), extract the year as a four-digit string 'YYYY'.
+    - If no date is mentioned, the value should be null.
 4.  **Handle Pagination:** If the user says "more" or "next", use the topic of their most recent search as the keyword.
 5.  **Output Format:** Your entire response MUST BE a single, valid JSON object with three keys: "keywords" (string), "limit" (integer), and "date" (string or null).
 
@@ -41,9 +46,10 @@ USER'S CURRENT MESSAGE:
 JSON RESPONSE:
 """
 
-print("AI Sermon Bot is starting...")
+print("Final bot with advanced date logic is starting...")
 
 # --- BOT LOGIC ---
+# (The start and get_instructions_from_llm functions remain the same)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data['search_history'] = []
@@ -103,14 +109,25 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     found_sermons = []
+    # --- NEW: ADVANCED DATE SEARCH LOGIC ---
     if search_date_str:
-        target_date = dateparser.parse(search_date_str, date_formats=['%d-%m-%Y'])
-        if target_date:
+        # Case 1: Search for a specific day (e.g., "DD-MM-YYYY")
+        if len(search_date_str) == 10:
+            target_date = dateparser.parse(search_date_str, date_formats=['%d-%m-%Y'])
+            if target_date:
+                for sermon in all_sermons:
+                    sermon_date = dateparser.parse(str(sermon.get('Date', '')), settings={'DATE_ORDER': 'DMY'})
+                    if sermon_date and sermon_date.date() == target_date.date():
+                        found_sermons.append({'sermon': sermon, 'score': 100})
+        # Case 2: Search for a whole year (e.g., "YYYY")
+        elif len(search_date_str) == 4 and search_date_str.isdigit():
+            target_year = int(search_date_str)
             for sermon in all_sermons:
                 sermon_date = dateparser.parse(str(sermon.get('Date', '')), settings={'DATE_ORDER': 'DMY'})
-                if sermon_date and sermon_date.date() == target_date.date():
+                if sermon_date and sermon_date.year == target_year:
                     found_sermons.append({'sermon': sermon, 'score': 100})
     else:
+        # --- FALLBACK TO KEYWORD SEARCH ---
         offset = context.user_data['pagination_map'][keywords_str]
         if offset == 0:
             search_terms = [term.strip() for term in keywords_str.split(',')]
@@ -125,7 +142,7 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     if search_date_str:
         all_found_sermons = found_sermons
-        offset = 0
+        offset = 0 
     else:
         all_found_sermons = context.user_data.get(keywords_str + '_results', [])
         offset = context.user_data['pagination_map'][keywords_str]
