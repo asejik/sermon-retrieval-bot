@@ -3,6 +3,7 @@ import os
 import re
 import json
 import gspread
+import json # We need this to read the credentials string
 import dateparser
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -101,7 +102,9 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if keywords_str not in context.user_data['pagination_map']: context.user_data['pagination_map'][keywords_str] = 0
 
     try:
-        gc = gspread.service_account(filename='credentials.json')
+        # Read the credentials from the environment variable
+        creds_json = json.loads(os.getenv('GSPREAD_CREDENTIALS'))
+        gc = gspread.service_account_from_dict(creds_json)
         sh = gc.open("CLC Message Prompter").sheet1
         all_sermons = sh.get_all_records()
     except Exception as e:
