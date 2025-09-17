@@ -3,15 +3,12 @@ import os
 import re
 import json
 import gspread
-import json # We need this to read the credentials string
 import dateparser
 import google.generativeai as genai
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from thefuzz import fuzz
-from flask import Flask # New: Import Flask for the web server
-from threading import Thread # New: To run the bot and server together
 
 # --- SETUP AND AUTHENTICATION ---
 
@@ -22,22 +19,10 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 genai.configure(api_key=GEMINI_API_KEY)
 llm = genai.GenerativeModel('gemini-1.5-flash')
 
-# --- NEW: FLASK WEB SERVER SETUP ---
-# This part will keep the Render Web Service "live"
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Telegram bot is running."
-
-def run_flask():
-    # Render provides the PORT environment variable
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
-
-# --- MASTER PROMPT FOR THE LLM ---
+# MASTER_PROMPT for the LLM
 MASTER_PROMPT = """
-You are a highly intelligent sermon retrieval assistant for Citizens of Light Church. Your goal is to analyze the user's message and return a structured JSON object.
+You are a highly intelligent sermon retrieval assistant for Citizens of Light Church.
+Your goal is to analyze the user's message and return a structured JSON object.
 
 RULES:
 1.  **Extract Keywords:** Infer themes from situations, Bible verses, or direct queries.
@@ -45,20 +30,22 @@ RULES:
 3.  **Extract Date:** If the user specifies a date (e.g., 'October 27, 2024'), extract it and format it as 'DD-MM-YYYY'. If no date is mentioned, the value should be null.
 4.  **Handle Pagination:** If the user says "more" or "next", use the topic of their most recent search as the keyword.
 5.  **Output Format:** Your entire response MUST BE a single, valid JSON object with three keys: "keywords" (string), "limit" (integer), and "date" (string or null).
+
 ---
-USER'S SEARCH HISTORY (most recent is last): {history}
+USER'S SEARCH HISTORY (most recent is last):
+{history}
 ---
-USER'S CURRENT MESSAGE: "{query}"
+USER'S CURRENT MESSAGE:
+"{query}"
 ---
 JSON RESPONSE:
 """
 
-print("Bot is starting (forced restart)...")
+print("PythonAnywhere bot is starting...")
 
 # --- BOT LOGIC ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a welcome message and clears the user's search history."""
     context.user_data['search_history'] = []
     context.user_data['pagination_map'] = {}
     user = update.effective_user
@@ -86,7 +73,6 @@ async def get_instructions_from_llm(query, history_list):
         return {'keywords': query.lower(), 'limit': 10, 'date': None}
 
 async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # ... (The entire search_sermons function remains unchanged)
     if 'search_history' not in context.user_data: context.user_data['search_history'] = []
     if 'pagination_map' not in context.user_data: context.user_data['pagination_map'] = {}
 
@@ -107,7 +93,6 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if keywords_str not in context.user_data['pagination_map']: context.user_data['pagination_map'][keywords_str] = 0
 
     try:
-        # Read the credentials from the environment variable
         creds_json = json.loads(os.getenv('GSPREAD_CREDENTIALS'))
         gc = gspread.service_account_from_dict(creds_json)
         sh = gc.open("CLC Message Prompter").sheet1
@@ -170,9 +155,4 @@ def main() -> None:
     application.run_polling()
 
 if __name__ == '__main__':
-    # Start the Flask server in a new thread
-    flask_thread = Thread(target=run_flask)
-    flask_thread.start()
-    
-    # Start the Telegram bot
     main()
