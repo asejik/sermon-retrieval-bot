@@ -55,6 +55,3 @@ To run this project locally, follow these steps:
     ```bash
     python bot.py
     ```
-
----
-*This project was developed by [Your Name] with guidance from a collaborative AI partner.*
