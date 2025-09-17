@@ -41,7 +41,7 @@ USER'S CURRENT MESSAGE:
 JSON RESPONSE:
 """
 
-print("PythonAnywhere bot is starting...")
+print("AI Sermon Bot is starting...")
 
 # --- BOT LOGIC ---
 
