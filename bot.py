@@ -4,7 +4,7 @@ import re
 import json
 import gspread
 import dateparser
-from datetime import datetime # New: For date handling
+from datetime import datetime
 import google.generativeai as genai
 from dotenv import load_dotenv
 from telegram import Update
@@ -24,7 +24,7 @@ llm = genai.GenerativeModel('gemini-1.5-flash')
 MASTER_PROMPT = """
 You are a highly intelligent sermon retrieval assistant for Citizens of Light Church.
 Your goal is to analyze the user's message and return a structured JSON object.
-The current date is Wednesday, September 17, 2025.
+The current date is Thursday, September 18, 2025.
 
 RULES:
 1.  **Extract Keywords:** Infer themes from situations, Bible verses, or direct queries.
@@ -46,10 +46,9 @@ USER'S CURRENT MESSAGE:
 JSON RESPONSE:
 """
 
-print("Final bot with advanced date logic is starting...")
+print("Bot with Debug Mode is starting...")
 
 # --- BOT LOGIC ---
-# (The start and get_instructions_from_llm functions remain the same)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data['search_history'] = []
@@ -109,9 +108,11 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     found_sermons = []
-    # --- NEW: ADVANCED DATE SEARCH LOGIC ---
+    # --- ADDED DEBUG VARIABLE ---
+    highest_score_found = 0
+
     if search_date_str:
-        # Case 1: Search for a specific day (e.g., "DD-MM-YYYY")
+        # (Date logic is unchanged)
         if len(search_date_str) == 10:
             target_date = dateparser.parse(search_date_str, date_formats=['%d-%m-%Y'])
             if target_date:
@@ -119,7 +120,6 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     sermon_date = dateparser.parse(str(sermon.get('Date', '')), settings={'DATE_ORDER': 'DMY'})
                     if sermon_date and sermon_date.date() == target_date.date():
                         found_sermons.append({'sermon': sermon, 'score': 100})
-        # Case 2: Search for a whole year (e.g., "YYYY")
         elif len(search_date_str) == 4 and search_date_str.isdigit():
             target_year = int(search_date_str)
             for sermon in all_sermons:
@@ -127,7 +127,6 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 if sermon_date and sermon_date.year == target_year:
                     found_sermons.append({'sermon': sermon, 'score': 100})
     else:
-        # --- FALLBACK TO KEYWORD SEARCH ---
         offset = context.user_data['pagination_map'][keywords_str]
         if offset == 0:
             search_terms = [term.strip() for term in keywords_str.split(',')]
@@ -135,14 +134,19 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 search_text = f"{sermon.get('Message Title', '')} {sermon.get('Preacher', '')}".lower()
                 total_score = sum(fuzz.token_set_ratio(term, search_text) for term in search_terms)
                 avg_score = total_score / len(search_terms) if search_terms else 0
+                
+                if avg_score > highest_score_found:
+                    highest_score_found = avg_score # Track the best score we see
+
                 if avg_score > 70:
                     found_sermons.append({'sermon': sermon, 'score': avg_score})
             found_sermons.sort(key=lambda x: x['score'], reverse=True)
             context.user_data[keywords_str + '_results'] = found_sermons
+            context.user_data[keywords_str + '_highest_score'] = highest_score_found
     
     if search_date_str:
         all_found_sermons = found_sermons
-        offset = 0 
+        offset = 0
     else:
         all_found_sermons = context.user_data.get(keywords_str + '_results', [])
         offset = context.user_data['pagination_map'][keywords_str]
@@ -150,8 +154,18 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     results_to_show = all_found_sermons[offset : offset + limit]
 
     if not results_to_show:
-        message = "No more results for this search." if offset > 0 else "Sorry, I couldn't find any sermons matching your search."
-        await update.message.reply_text(message)
+        if offset == 0:
+            # --- OUR NEW DEBUG REPLY ---
+            highest_score = context.user_data.get(keywords_str + '_highest_score', 0)
+            debug_message = (
+                f"I couldn't find a confident match. Here's my thinking process:\n\n"
+                f"🧠 **AI Brain Keywords:** `{keywords_str}`\n"
+                f"📈 **Highest Match Score Found:** `{highest_score:.0f}%`\n"
+                f"🎯 **Confidence Threshold:** `70%`"
+            )
+            await update.message.reply_html(debug_message)
+        else:
+            await update.message.reply_text("No more results for this search.")
         return
 
     response_message = f"Showing results {offset + 1} to {offset + len(results_to_show)} of {len(all_found_sermons)}:\n\n"
@@ -165,7 +179,6 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_html(response_message)
 
 def main() -> None:
-    """Start the bot."""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_sermons))
