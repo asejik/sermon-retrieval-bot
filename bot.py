@@ -46,7 +46,7 @@ USER'S CURRENT MESSAGE:
 JSON RESPONSE:
 """
 
-print("Bot with Debug Mode is starting...")
+print("Final bot with word-by-word search is starting...")
 
 # --- BOT LOGIC ---
 
@@ -108,9 +108,6 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     found_sermons = []
-    # ADDED DEBUG VARIABLE
-    highest_score_found = 0
-
     if search_date_str:
         # (Date logic is unchanged)
         if len(search_date_str) == 10:
@@ -131,20 +128,23 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if offset == 0:
             search_terms = [term.strip() for term in keywords_str.split(',')]
             for sermon in all_sermons:
-                search_text = f"{sermon.get('Message Title', '')} {sermon.get('Preacher', '')}".lower()
+                title_words = str(sermon.get('Message Title', '')).lower().split()
+                preacher_words = str(sermon.get('Preacher', '')).lower().split()
+                all_words = title_words + preacher_words
                 
-                scores = [fuzz.token_set_ratio(term, search_text) for term in search_terms]
-                max_score = max(scores) if scores else 0
+                # --- FINAL, WORD-BY-WORD SEARCH LOGIC ---
+                highest_match_score = 0
+                for term in search_terms:
+                    for word in all_words:
+                        score = fuzz.ratio(term, word)
+                        if score > highest_match_score:
+                            highest_match_score = score
                 
-                if max_score > highest_score_found:
-                    highest_score_found = max_score
-
-                if max_score > 85:
-                    found_sermons.append({'sermon': sermon, 'score': max_score})
+                if highest_match_score > 90: # Use a high threshold for direct word matching
+                    found_sermons.append({'sermon': sermon, 'score': highest_match_score})
 
             found_sermons.sort(key=lambda x: x['score'], reverse=True)
             context.user_data[keywords_str + '_results'] = found_sermons
-            context.user_data[keywords_str + '_highest_score'] = highest_score_found
     
     if search_date_str:
         all_found_sermons = found_sermons
@@ -156,19 +156,8 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     results_to_show = all_found_sermons[offset : offset + limit]
 
     if not results_to_show:
-        if not search_date_str and offset == 0:
-            # --- OUR NEW DEBUG REPLY ---
-            highest_score = context.user_data.get(keywords_str + '_highest_score', 0)
-            debug_message = (
-                f"I couldn't find a confident match. Here's my thinking process:\n\n"
-                f"🧠 **AI Brain Keywords:** `{keywords_str}`\n"
-                f"📈 **Highest Match Score Found:** `{highest_score:.0f}%`\n"
-                f"🎯 **Confidence Threshold:** `85%`"
-            )
-            await update.message.reply_html(debug_message)
-        else:
-            message = "No more results for this search." if offset > 0 else "Sorry, I couldn't find any sermons matching your search."
-            await update.message.reply_text(message)
+        message = "No more results for this search." if offset > 0 else "Sorry, I couldn't find any sermons matching your search."
+        await update.message.reply_text(message)
         return
 
     response_message = f"Showing results {offset + 1} to {offset + len(results_to_show)} of {len(all_found_sermons)}:\n\n"
