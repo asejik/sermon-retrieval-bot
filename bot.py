@@ -133,7 +133,7 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             search_terms = [term.strip() for term in keywords_str.split(',')]
             for sermon in all_sermons:
                 search_text = f"{sermon.get('Message Title', '')} {sermon.get('Preacher', '')}".lower()
-                total_score = sum(fuzz.partial_ratio(term, search_text) for term in search_terms)
+                total_score = sum(fuzz.token_set_ratio(term, search_text) for term in search_terms)
                 avg_score = total_score / len(search_terms) if search_terms else 0
                 if avg_score > 70:
                     found_sermons.append({'sermon': sermon, 'score': avg_score})
