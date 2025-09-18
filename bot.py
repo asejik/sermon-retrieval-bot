@@ -46,7 +46,7 @@ USER'S CURRENT MESSAGE:
 JSON RESPONSE:
 """
 
-print("Bot with Debug Mode is starting...")
+print("Final bot with max_score logic is starting...")
 
 # --- BOT LOGIC ---
 
@@ -108,9 +108,6 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     found_sermons = []
-    # --- ADDED DEBUG VARIABLE ---
-    highest_score_found = 0
-
     if search_date_str:
         # (Date logic is unchanged)
         if len(search_date_str) == 10:
@@ -132,21 +129,21 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             search_terms = [term.strip() for term in keywords_str.split(',')]
             for sermon in all_sermons:
                 search_text = f"{sermon.get('Message Title', '')} {sermon.get('Preacher', '')}".lower()
-                total_score = sum(fuzz.token_set_ratio(term, search_text) for term in search_terms)
-                avg_score = total_score / len(search_terms) if search_terms else 0
                 
-                if avg_score > highest_score_found:
-                    highest_score_found = avg_score # Track the best score we see
+                # --- NEW: FINAL SEARCH LOGIC ---
+                # Find the highest score for any single keyword
+                scores = [fuzz.token_set_ratio(term, search_text) for term in search_terms]
+                max_score = max(scores) if scores else 0
+                
+                if max_score > 85: # Use a higher threshold for better accuracy
+                    found_sermons.append({'sermon': sermon, 'score': max_score})
 
-                if avg_score > 70:
-                    found_sermons.append({'sermon': sermon, 'score': avg_score})
             found_sermons.sort(key=lambda x: x['score'], reverse=True)
             context.user_data[keywords_str + '_results'] = found_sermons
-            context.user_data[keywords_str + '_highest_score'] = highest_score_found
     
     if search_date_str:
         all_found_sermons = found_sermons
-        offset = 0
+        offset = 0 
     else:
         all_found_sermons = context.user_data.get(keywords_str + '_results', [])
         offset = context.user_data['pagination_map'][keywords_str]
@@ -154,18 +151,8 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     results_to_show = all_found_sermons[offset : offset + limit]
 
     if not results_to_show:
-        if offset == 0:
-            # --- OUR NEW DEBUG REPLY ---
-            highest_score = context.user_data.get(keywords_str + '_highest_score', 0)
-            debug_message = (
-                f"I couldn't find a confident match. Here's my thinking process:\n\n"
-                f"🧠 **AI Brain Keywords:** `{keywords_str}`\n"
-                f"📈 **Highest Match Score Found:** `{highest_score:.0f}%`\n"
-                f"🎯 **Confidence Threshold:** `70%`"
-            )
-            await update.message.reply_html(debug_message)
-        else:
-            await update.message.reply_text("No more results for this search.")
+        message = "No more results for this search." if offset > 0 else "Sorry, I couldn't find any sermons matching your search."
+        await update.message.reply_text(message)
         return
 
     response_message = f"Showing results {offset + 1} to {offset + len(results_to_show)} of {len(all_found_sermons)}:\n\n"
@@ -179,6 +166,7 @@ async def search_sermons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_html(response_message)
 
 def main() -> None:
+    """Start the bot."""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_sermons))
